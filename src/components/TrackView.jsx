@@ -35,6 +35,8 @@ const TrackView = forwardRef(function TrackView({
   showCumDist = true,
   showElevProfile = true,
   onElevProfileChange,
+  showNavOverlay = true,
+  onNavOverlayChange,
   onViewModeChange,
 }, ref) {
   const containerRef = useRef(null);
@@ -71,8 +73,10 @@ const TrackView = forwardRef(function TrackView({
   const pan3DRef = useRef({ x: 0, y: 0 });
   const minimap3DDragging = useRef(false);
   const [zMul, setZmul] = useState(100);
+  const [zOverlayOpen, setZOverlayOpen] = useState(false);
   const [showPoints3D, setShowPoints3D] = useState(true);
   const [showPoints2D, setShowPoints2D] = useState(true);
+  const [trackOffScreen, setTrackOffScreen] = useState(false);
   const [reset3DKey, setReset3DKey] = useState(0);
   const [resetMapKey, setResetMapKey] = useState(0);
   const [mapToggleKey, setMapToggleKey] = useState(0);
@@ -101,23 +105,9 @@ const TrackView = forwardRef(function TrackView({
 
   // Draggable toolbar state — persisted across refreshes
   const barRef = useRef(null);
-  const [barPosition, setBarPosition] = useState(() => {
-    try {
-      const saved = localStorage.getItem('railsim_barPosition');
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  }); // null = default CSS pos
+  const [barPosition, setBarPosition] = useState(null); // null = default CSS pos; never persisted
   const barDragOffsetRef = useRef({ x: 0, y: 0 });
   const barDraggingRef = useRef(false);
-
-  // Persist barPosition
-  useEffect(() => {
-    if (barPosition) {
-      localStorage.setItem('railsim_barPosition', JSON.stringify(barPosition));
-    } else {
-      localStorage.removeItem('railsim_barPosition');
-    }
-  }, [barPosition]);
 
   // Ensure gsap tween target exists
   if (!gsapTweenRef.current) {
@@ -260,13 +250,20 @@ const TrackView = forwardRef(function TrackView({
 
   // ── Draggable toolbar ────────────────────────────────────────────────────
   const handleBarMouseDown = useCallback((e) => {
-    // Allow drag only from the drag-handle icon or the bar background (not buttons/inputs)
-    const isDragHandle = e.target.classList.contains('bar-drag-handle');
-    const isBarRoot = e.target === barRef.current;
-    if (!isDragHandle && !isBarRoot) return;
+    // Allow drag from anywhere on the bar except interactive controls
+    if (e.target.closest('button, input, select, a')) return;
     e.preventDefault();
     const rect = barRef.current.getBoundingClientRect();
     barDragOffsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    barDraggingRef.current = true;
+  }, []);
+
+  const handleBarTouchStart = useCallback((e) => {
+    if (e.target.closest('button, input, select, a')) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const rect = barRef.current.getBoundingClientRect();
+    barDragOffsetRef.current = { x: t.clientX - rect.left, y: t.clientY - rect.top };
     barDraggingRef.current = true;
   }, []);
 
@@ -283,11 +280,29 @@ const TrackView = forwardRef(function TrackView({
       setBarPosition({ x, y });
     };
     const onUp = () => { barDraggingRef.current = false; };
+    const onTouchMove = (e) => {
+      e.preventDefault();
+      if (!barDraggingRef.current || !barRef.current) return;
+      const container = barRef.current.parentElement;
+      if (!container) return;
+      const cRect = container.getBoundingClientRect();
+      const t = e.touches[0];
+      const barW = barRef.current.offsetWidth;
+      const barH = barRef.current.offsetHeight;
+      const x = Math.max(0, Math.min(t.clientX - cRect.left - barDragOffsetRef.current.x, cRect.width - barW));
+      const y = Math.max(0, Math.min(t.clientY - cRect.top - barDragOffsetRef.current.y, cRect.height - barH));
+      setBarPosition({ x, y });
+    };
+    const onTouchEnd = () => { barDraggingRef.current = false; };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd);
     return () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
     };
   }, []);
 
@@ -579,6 +594,7 @@ const TrackView = forwardRef(function TrackView({
   }, [displayData, simIndex, viewScaleRef, viewOffsetXRef, viewOffsetYRef, canvasRef, displayChIndex, showSegDist, showCumDist, showPoints2D]);
 
   // Render loop
+  const offScreenCheckRef = useRef(0); // throttle the off-screen check
   useEffect(() => {
     let running = true;
     const loop = () => {
@@ -593,6 +609,18 @@ const TrackView = forwardRef(function TrackView({
           viewOffsetXRef.current,
           viewOffsetYRef.current
         );
+      }
+      // Check once per ~60 frames whether any track point is visible
+      offScreenCheckRef.current = (offScreenCheckRef.current + 1) % 60;
+      if (offScreenCheckRef.current === 0 && canvasRef.current && displayData.length >= 2) {
+        const canvas = canvasRef.current;
+        const { scale, ox, oy } = getTransform(displayData, canvas.width, canvas.height, viewScaleRef.current, viewOffsetXRef.current, viewOffsetYRef.current);
+        const visible = displayData.some(p => {
+          const sx = p.easting * scale + ox;
+          const sy = -p.northing * scale + oy;
+          return sx > -40 && sx < canvas.width + 40 && sy > -40 && sy < canvas.height + 40;
+        });
+        setTrackOffScreen(!visible);
       }
       animFrameRef.current = requestAnimationFrame(loop);
     };
@@ -636,8 +664,31 @@ const TrackView = forwardRef(function TrackView({
       x: e.clientX - viewOffsetXRef.current,
       y: e.clientY - viewOffsetYRef.current,
     };
-    canvasRef.current.style.cursor = 'grabbing';
-  }, [viewOffsetXRef, viewOffsetYRef, canvasRef]);
+    if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+
+    // Document-level listeners so pan continues even if pointer leaves canvas
+    const onDocMove = (ev) => {
+      if (!isDragging.current) return;
+      viewOffsetXRef.current = ev.clientX - dragStart.current.x;
+      viewOffsetYRef.current = ev.clientY - dragStart.current.y;
+    };
+    const onDocUp = (ev) => {
+      isDragging.current = false;
+      if (canvasRef.current) canvasRef.current.style.cursor = 'default';
+      if (clickStartRef.current) {
+        const dx = ev.clientX - clickStartRef.current.x;
+        const dy = ev.clientY - clickStartRef.current.y;
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6 && lastHoveredRef.current >= 0) {
+          jumpToPointInData(displayData, lastHoveredRef.current);
+        }
+        clickStartRef.current = null;
+      }
+      document.removeEventListener('mousemove', onDocMove);
+      document.removeEventListener('mouseup', onDocUp);
+    };
+    document.addEventListener('mousemove', onDocMove);
+    document.addEventListener('mouseup', onDocUp);
+  }, [viewOffsetXRef, viewOffsetYRef, canvasRef, displayData, jumpToPointInData]);
 
   const handleMouseMove = useCallback((e) => {
     const canvas = canvasRef.current;
@@ -654,10 +705,8 @@ const TrackView = forwardRef(function TrackView({
       return;
     }
 
-    if (isDragging.current) {
-      viewOffsetXRef.current = e.clientX - dragStart.current.x;
-      viewOffsetYRef.current = e.clientY - dragStart.current.y;
-    } else {
+    // Pan is handled by the document-level listener in handleMouseDown
+    if (!isDragging.current) {
       // Hover detection — search displayData so the transform matches what's rendered.
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -789,22 +838,12 @@ const TrackView = forwardRef(function TrackView({
       return;
     }
 
-    isDragging.current = false;
+    // Drag-end and click-to-select are handled by the document listener in handleMouseDown
     if (canvasRef.current) canvasRef.current.style.cursor = 'default';
-
-    // Click-to-select: if barely moved and a point was under the cursor, jump to it
-    if (e && clickStartRef.current) {
-      const dx = e.clientX - clickStartRef.current.x;
-      const dy = e.clientY - clickStartRef.current.y;
-      if (Math.abs(dx) < 6 && Math.abs(dy) < 6 && lastHoveredRef.current >= 0) {
-        jumpToPointInData(displayData, lastHoveredRef.current);
-      }
-      clickStartRef.current = null;
-    }
   }, [canvasRef, trackData, displayData, viewScaleRef, viewOffsetXRef, viewOffsetYRef, onSetViewScale, gsapTweenRef, jumpToPointInData]);
 
   const handleMouseLeave = useCallback(() => {
-    isDragging.current = false;
+    // isDragging is now cleared by the document mouseup listener; only clear zoom-box and tooltip here
     if (isZoomBox2DRef.current) {
       isZoomBox2DRef.current = false;
       zoomBox2DDrawRef.current = null;
@@ -812,6 +851,55 @@ const TrackView = forwardRef(function TrackView({
     }
     setTooltip(prev => ({ ...prev, visible: false }));
   }, [setTooltip]);
+
+  // Touch pan — non-passive so we can preventDefault to block scroll while panning
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      isDragging.current = true;
+      clickStartRef.current = { x: t.clientX, y: t.clientY };
+      dragStart.current = {
+        x: t.clientX - viewOffsetXRef.current,
+        y: t.clientY - viewOffsetYRef.current,
+      };
+    };
+
+    const onTouchMove = (e) => {
+      if (!isDragging.current || e.touches.length !== 1) return;
+      e.preventDefault(); // prevent page scroll while panning
+      const t = e.touches[0];
+      viewOffsetXRef.current = t.clientX - dragStart.current.x;
+      viewOffsetYRef.current = t.clientY - dragStart.current.y;
+    };
+
+    const onTouchEnd = (e) => {
+      isDragging.current = false;
+      if (e.changedTouches.length > 0 && clickStartRef.current) {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - clickStartRef.current.x;
+        const dy = t.clientY - clickStartRef.current.y;
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && lastHoveredRef.current >= 0) {
+          jumpToPointInData(displayData, lastHoveredRef.current);
+        }
+        clickStartRef.current = null;
+      }
+    };
+
+    canvas.addEventListener('touchstart',  onTouchStart, { passive: true });
+    canvas.addEventListener('touchmove',   onTouchMove,  { passive: false });
+    canvas.addEventListener('touchend',    onTouchEnd,   { passive: true });
+    canvas.addEventListener('touchcancel', onTouchEnd,   { passive: true });
+    return () => {
+      canvas.removeEventListener('touchstart',  onTouchStart);
+      canvas.removeEventListener('touchmove',   onTouchMove);
+      canvas.removeEventListener('touchend',    onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [canvasRef, viewOffsetXRef, viewOffsetYRef, displayData, jumpToPointInData]);
 
   // Non-passive wheel on main canvas — zoom toward jump-to-point selection in 2D mode
   useEffect(() => {
@@ -867,6 +955,33 @@ const TrackView = forwardRef(function TrackView({
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, [onMinimapWheel]);
+
+  // ── Minimap touch pan (mobile) ──────────────────────────────────────────
+  useEffect(() => {
+    const el = minimapRef.current;
+    if (!el) return;
+    const firePan = (clientX, clientY) => {
+      if (!show3DRef.current && onMinimapMouseDown) {
+        onMinimapMouseDown({ clientX, clientY });
+      }
+    };
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 1) return;
+      e.preventDefault();
+      firePan(e.touches[0].clientX, e.touches[0].clientY);
+    };
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 1) return;
+      e.preventDefault();
+      firePan(e.touches[0].clientX, e.touches[0].clientY);
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove',  onTouchMove);
+    };
+  }, [minimapRef, onMinimapMouseDown]);
 
   // ── Convert minimap pixel click → world (E, N) coordinates ─────────────
   const minimapToWorld = useCallback((clientX, clientY) => {
@@ -1082,7 +1197,7 @@ const TrackView = forwardRef(function TrackView({
             { label: 'ZOOM',   value: `${Math.round(viewScale * 100)}%`, color: '#64748b' },
           ];
           return (
-            <div style={{
+            <div className="stats-hud-2d" style={{
               position: 'absolute', top: 8, left: 8, zIndex: 10,
               pointerEvents: 'none', userSelect: 'none',
               display: 'flex', gap: 4, flexWrap: 'wrap',
@@ -1195,6 +1310,7 @@ const TrackView = forwardRef(function TrackView({
             resetTrigger={reset3DKey}
             showElevProfile={showElevProfile}
             onElevProfileChange={onElevProfileChange}
+            showNavOverlay={showNavOverlay}
             onZoomChange={setZoom3D}
             onChIndexChange={(idx) => {
               const clamped = Math.max(0, Math.min(idx, trackData.length - 1));
@@ -1213,11 +1329,12 @@ const TrackView = forwardRef(function TrackView({
           <MemoRailCompareView
             visible={showCompare}
             onClose={handleToggleCompare}
-            trackData={displayData}
+            trackData={graphViewData}
             fullTrackData={trackData}
             activeRange={activeRange}
-            activeIndex={displayChIndex}
-            hoveredIdx={displayHoveredIdx}
+            activeIndex={graphViewData.length > 0 && globalActiveIdx >= 0 ? Math.max(0, Math.min(globalActiveIdx - graphViewStartIdx, graphViewData.length - 1)) : 0}
+            hoveredIdx={graphViewData.length > 0 && hoveredPoint >= 0 ? Math.max(0, Math.min(hoveredPoint - graphViewStartIdx, graphViewData.length - 1)) : -1}
+            chartStartIdx={graphViewStartIdx}
             onMapRangeChange={handleMapRangeChange}
             scrollToRange={activeRange}
             showSegDist={showSegDist}
@@ -1491,11 +1608,27 @@ const TrackView = forwardRef(function TrackView({
           );
         })()}
 
+        {/* Back-to-track button — shown when track is fully off-screen */}
+        {trackOffScreen && !show3D && !graphViewActive && !showCompare && displayData.length >= 2 && (
+          <button
+            className="back-to-track-btn"
+            onClick={() => {
+              clearRange();
+              setResetMapKey(k => k + 1);
+            }}
+            title="Track is off-screen — tap to re-centre"
+          >
+            <span className="material-icons" style={{ fontSize: 18, pointerEvents: 'none' }}>my_location</span>
+            Back to track
+          </button>
+        )}
+
         {/* View Controls — draggable toolbar */}
         <div
           className="view-controls"
           ref={barRef}
           onMouseDown={handleBarMouseDown}
+          onTouchStart={handleBarTouchStart}
           style={barPosition ? {
             position: 'absolute',
             left: barPosition.x,
@@ -1602,7 +1735,8 @@ const TrackView = forwardRef(function TrackView({
             id="viewModeBtn"
             title="Analytics View (Ctrl+Shift+A)"
           >
-            Analytics
+            <span className="material-icons" style={{ fontSize: 14, pointerEvents: 'none' }}>bar_chart</span>
+            <span className="btn-label-text">Analytics</span>
           </button>
 
           <div className="view-separator" />
@@ -1624,14 +1758,15 @@ const TrackView = forwardRef(function TrackView({
             title="Compare View (Ctrl+Shift+C)"
           >
             <span className="material-icons" style={{ fontSize: 14, pointerEvents: 'none' }}>compare</span>
-            Compare
+            <span className="btn-label-text">Compare</span>
           </button>
 
           <div className="view-separator" />
 
           <div className="mode-toggle" title="Switch between 2D and 3D view">
+            {/* Desktop: two separate buttons */}
             <button
-              className={`mode-toggle-btn${!show3D && !graphViewActive && !showCompare ? ' mode-toggle-active' : ''}`}
+              className={`mode-toggle-btn mode-toggle-btn--desktop${!show3D && !graphViewActive && !showCompare ? ' mode-toggle-active' : ''}`}
               onClick={(e) => {
                 btnPulse(e);
                 const wasActive = graphViewActive;
@@ -1648,11 +1783,10 @@ const TrackView = forwardRef(function TrackView({
               2D
             </button>
             <button
-              className={`mode-toggle-btn${show3D ? ' mode-toggle-active' : ''}`}
+              className={`mode-toggle-btn mode-toggle-btn--desktop${show3D ? ' mode-toggle-active' : ''}`}
               onClick={(e) => {
                 btnPulse(e);
                 const wasActive = graphViewActive;
-                // hide analytics first, then activate 3D
                 requestAnimationFrame(() => {
                   if (wasActive) toggleGraphView();
                   setShowCompare(false);
@@ -1663,6 +1797,34 @@ const TrackView = forwardRef(function TrackView({
             >
               <span className="material-icons" style={{ fontSize: 12, pointerEvents: 'none' }}>view_in_ar</span>
               3D
+            </button>
+            {/* Mobile: single toggle button */}
+            <button
+              className={`mode-toggle-btn mode-toggle-btn--mobile mode-toggle-active`}
+              onClick={(e) => {
+                btnPulse(e);
+                const wasActive = graphViewActive;
+                if (show3D) {
+                  setShow3D(false);
+                  pan3DRef.current = { x: 0, y: 0 };
+                  setPan3D({ x: 0, y: 0 });
+                  requestAnimationFrame(() => {
+                    if (wasActive) toggleGraphView();
+                    setShowCompare(false);
+                  });
+                } else {
+                  requestAnimationFrame(() => {
+                    if (wasActive) toggleGraphView();
+                    setShowCompare(false);
+                    setShow3D(true);
+                  });
+                }
+              }}
+              title="Toggle 2D / 3D view"
+            >
+              {show3D
+                ? <><span className="material-icons" style={{ fontSize: 12, pointerEvents: 'none' }}>view_in_ar</span>3D</>
+                : <>2D</>}
             </button>
           </div>
 
@@ -1681,7 +1843,7 @@ const TrackView = forwardRef(function TrackView({
             style={{ padding: '3px 8px', fontSize: 9 }}
           >
             <span className="material-icons" style={{ fontSize: 12, pointerEvents: 'none' }}>scatter_plot</span>
-            Pts
+            <span className="btn-label-text">Pts</span>
           </button>
 
           {show3D && (
@@ -1694,7 +1856,18 @@ const TrackView = forwardRef(function TrackView({
               >
                 <span className="material-icons" style={{ fontSize: 18, pointerEvents: 'none' }}>home</span>
               </button>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+
+              <button
+                className={`btn-icon${showNavOverlay ? ' active' : ''}`}
+                onClick={() => onNavOverlayChange?.(v => !v)}
+                title={showNavOverlay ? 'Hide NAV panel' : 'Show NAV panel'}
+                style={showNavOverlay ? { color: 'var(--brand)', background: 'rgba(244,129,32,0.12)' } : undefined}
+              >
+                <span className="material-icons" style={{ fontSize: 16, pointerEvents: 'none' }}>map</span>
+              </button>
+
+              {/* Desktop: inline horizontal Z slider */}
+              <div className="z-adjuster-desktop" style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                 <span style={{ fontSize: 8, color: 'rgba(148,163,184,0.6)', pointerEvents: 'none' }}>Z</span>
                 <input
                   type="range" min="100" max="8000" step="100"
@@ -1708,10 +1881,43 @@ const TrackView = forwardRef(function TrackView({
                   minWidth: 32, fontFamily: 'monospace', pointerEvents: 'none',
                 }}>×{zMul}</span>
               </div>
+
+              {/* Mobile: Z button + vertical overlay */}
+              <button
+                className="btn-icon z-adjuster-mobile"
+                onClick={() => setZOverlayOpen(v => !v)}
+                title="Vertical Exaggeration"
+                style={zOverlayOpen ? { color: 'var(--brand)', background: 'rgba(244,129,32,0.15)' } : undefined}
+              >
+                <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace', pointerEvents: 'none' }}>Z</span>
+              </button>
+
             </>
           )}
         </div>
       </div>
+
+      {/* Z vertical overlay — rendered outside view-controls to escape its transform stacking context */}
+      {show3D && zOverlayOpen && (
+        <div
+          className="z-overlay-backdrop"
+          onClick={() => setZOverlayOpen(false)}
+        >
+          <div className="z-overlay-panel" onClick={e => e.stopPropagation()}>
+            <span className="z-overlay-label">×{zMul}</span>
+            <div className="z-overlay-track">
+              <input
+                type="range"
+                className="z-overlay-slider"
+                min="100" max="8000" step="100"
+                value={zMul}
+                onChange={(e) => setZmul(Number(e.target.value))}
+              />
+            </div>
+            <span className="z-overlay-title">Z</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

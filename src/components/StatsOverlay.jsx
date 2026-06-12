@@ -1,23 +1,65 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { computeStats } from '../utils/geometry';
 
-export default function StatsOverlay({ trackData = [], designGauge, gaugeType, compactMode, activePoint, activeView, sidebarV2 = true, leftCollapsed = false }) {
+export default function StatsOverlay({ trackData = [], designGauge, gaugeType, activePoint, activeView }) {
   const [collapsed, setCollapsed] = useState(true);
+  const [position, setPosition] = useState({ top: 68, left: 66 });
   const stats = trackData.length >= 2 ? computeStats(trackData, designGauge) : null;
+  const draggingRef = useRef(false);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const dragMovedRef = useRef(false);
+  const posRef = useRef({ top: 68, left: 66 });
 
-  const topOffset = 68;
+  const handleMouseDown = useCallback((e) => {
+    e.preventDefault();
+    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+    dragOffsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    draggingRef.current = true;
+    dragMovedRef.current = false;
+  }, []);
 
-  // Position adjusts based on sidebar mode:
-  // V2 sidebar → left:66px (right of floating icon bar)
-  // V1 expanded → left:290px (right of the 280px LeftPanel)
-  // V1 collapsed → left:50px (right of collapsed 36px LeftPanel)
-  const leftOffset = sidebarV2 ? 66 : (leftCollapsed ? 50 : 290);
+  const handleTouchStart = useCallback((e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+    dragOffsetRef.current = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+    dragStartRef.current = { x: t.clientX, y: t.clientY };
+    draggingRef.current = true;
+    dragMovedRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    const updatePos = (cx, cy) => {
+      const newPos = { top: cy - dragOffsetRef.current.y, left: cx - dragOffsetRef.current.x };
+      posRef.current = newPos;
+      setPosition(newPos);
+      if (Math.abs(cx - dragStartRef.current.x) > 6 || Math.abs(cy - dragStartRef.current.y) > 6) {
+        dragMovedRef.current = true;
+      }
+    };
+    const onMove = (e) => { if (draggingRef.current) updatePos(e.clientX, e.clientY); };
+    const onUp = () => { draggingRef.current = false; };
+    const onTouchMove = (e) => { if (draggingRef.current) { e.preventDefault(); const t = e.touches[0]; updatePos(t.clientX, t.clientY); } };
+    const onTouchEnd = () => { draggingRef.current = false; };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+    };
+  }, []);
 
   if (activeView === 'analytics' || activeView === 'compare') return null;
 
   if (!stats) {
     return (
-      <div className="stats-overlay stats-overlay--empty" style={{ top: topOffset, left: leftOffset }}>
+      <div className="stats-overlay stats-overlay--empty" style={{ top: position.top, left: position.left }}>
         <span className="material-icons" style={{ fontSize: 14, color: 'rgba(148,163,184,0.3)' }}>bar_chart</span>
         <span style={{ fontSize: 9, color: 'rgba(148,163,184,0.35)', letterSpacing: '0.5px' }}>NO DATA</span>
       </div>
@@ -33,10 +75,10 @@ export default function StatsOverlay({ trackData = [], designGauge, gaugeType, c
   const failPct   = total > 0 ? (gaugeFail / total * 100) : 0;
 
   return (
-    <div className="stats-overlay" style={{ top: topOffset, left: leftOffset }}>
+    <div className="stats-overlay" style={{ top: position.top, left: position.left }}>
 
       {/* ── Track Statistics header ────────────────────────────────────── */}
-      <div className="so-header" onClick={() => setCollapsed(v => !v)}>
+      <div className="so-header" onClick={() => { if (!dragMovedRef.current) setCollapsed(v => !v); }} onMouseDown={handleMouseDown} onTouchStart={handleTouchStart}>
         <span className="material-icons" style={{ fontSize: 13, color: 'var(--brand)' }}>bar_chart</span>
         <span className="so-title">Track Statistics</span>
         <span className="material-icons" style={{ fontSize: 13, color: 'rgba(148,163,184,0.5)', marginLeft: 'auto' }}>

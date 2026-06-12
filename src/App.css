@@ -784,6 +784,125 @@ body {
   font-weight: 700;
   color: var(--brand);
   font-family: var(--font-family);
+  white-space: nowrap;
+}
+.graph-controls { flex-wrap: wrap; }
+.graph-title-short { display: none; }
+.rc-title-short { display: none; }
+
+/* Map range indicator (shared between Analytics + Compare) */
+.gv-map-range {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 4px; font-size: 10px;
+  background: rgba(244,129,32,0.08);
+  border: 1px solid rgba(244,129,32,0.25);
+  color: #111827; white-space: nowrap;
+}
+.gv-map-range--row2 { display: none; }
+.gv-map-range-close {
+  background: none; border: none; cursor: pointer;
+  color: #6b7280; padding: 0 1px; line-height: 1;
+  display: flex; align-items: center;
+}
+.gv-map-range-close:hover { color: #374151; }
+
+/* Map popup (draggable floating card — top-right by default on desktop) */
+.gv-map-overlay-mobile {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  width: 240px;
+  height: 200px;
+  background: rgba(28, 29, 30, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(244, 129, 32, 0.2);
+  border-radius: 12px;
+  z-index: 180;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(244,129,32,0.08);
+  overflow: hidden;
+}
+.gv-map-overlay-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  cursor: grab;
+  background: rgba(255,255,255,0.04);
+  user-select: none;
+}
+.gv-map-overlay-header:active { cursor: grabbing; }
+.gv-map-overlay-close {
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px; cursor: pointer; color: #94a3b8;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.gv-map-overlay-close:hover { background: rgba(244,129,32,0.12); color: var(--brand); border-color: rgba(244,129,32,0.3); }
+.gv-map-overlay-legend {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  font-size: 10px;
+  color: rgba(148,163,184,0.6);
+  background: rgba(255,255,255,0.03);
+}
+
+/* Corner resize handle on the map popup */
+.gv-map-resize-corner {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 3px;
+  color: rgba(148,163,184,0.35);
+  transition: color 0.15s;
+  z-index: 5;
+}
+.gv-map-resize-corner:hover {
+  color: var(--brand);
+}
+
+/* Active point info bar in GraphView */
+.gv-pt-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  background: rgba(244,129,32,0.05);
+  border-bottom: 1px solid rgba(244,129,32,0.1);
+  flex-shrink: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.gv-pt-badge {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f48120;
+}
+.gv-pt-stat {
+  font-size: 10px;
+  color: #94a3b8;
+}
+.gv-pt-stat b {
+  color: #e2e8f0;
+  font-weight: 600;
 }
 
 /* Grid of charts inside the overlay */
@@ -997,6 +1116,7 @@ body {
   display: flex;
   gap: 4px;
   align-items: center;
+  touch-action: none;
   background: rgba(45, 46, 47, 0.95);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: var(--radius);
@@ -1656,6 +1776,438 @@ body {
   .minimap-container { display: none; }
 }
 
+/* Mobile toggle button: hidden by default, shown only on mobile */
+.view-controls .mode-toggle-btn--mobile { display: none; }
+
+/* ===== Back-to-track button ===== */
+.back-to-track-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(244,129,32,0.5);
+  background: rgba(22, 23, 24, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-family);
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(244,129,32,0.25), 0 0 0 1px rgba(244,129,32,0.08);
+  transition: all 0.15s;
+  animation: back-btn-pulse 2s ease-in-out infinite;
+  white-space: nowrap;
+}
+.back-to-track-btn:hover {
+  background: rgba(244,129,32,0.15);
+  border-color: var(--brand);
+  box-shadow: 0 6px 28px rgba(244,129,32,0.4);
+}
+@keyframes back-btn-pulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(244,129,32,0.25), 0 0 0 1px rgba(244,129,32,0.08); }
+  50%       { box-shadow: 0 4px 28px rgba(244,129,32,0.5), 0 0 0 3px rgba(244,129,32,0.12); }
+}
+
+/* Z adjuster: desktop visible, mobile button hidden by default */
+.z-adjuster-mobile { display: none; }
+
+/* ===== Z vertical overlay (mobile volume-style) ===== */
+.z-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: transparent;
+}
+
+.z-overlay-panel {
+  position: fixed;
+  bottom: 90px;
+  right: 16px;
+  width: 52px;
+  padding: 14px 0 10px;
+  background: rgba(22, 23, 24, 0.95);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 26px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(244,129,32,0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: z-panel-in 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes z-panel-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.92); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+.z-overlay-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--brand);
+  font-family: monospace;
+  letter-spacing: -0.3px;
+}
+
+.z-overlay-track {
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.z-overlay-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  width: 4px;
+  height: 160px;
+  accent-color: var(--brand);
+  cursor: pointer;
+  outline: none;
+}
+
+/* Fallback for browsers that don't support slider-vertical */
+@supports not (appearance: slider-vertical) {
+  .z-overlay-track {
+    height: 160px;
+    width: 28px;
+  }
+  .z-overlay-slider {
+    writing-mode: unset;
+    -webkit-appearance: none;
+    appearance: none;
+    transform: rotate(-90deg);
+    transform-origin: center center;
+    width: 160px;
+    height: 4px;
+  }
+}
+
+.z-overlay-title {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(148,163,184,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* ===== Mobile — small phones (≤ 520px) ===== */
+@media (max-width: 520px) {
+  /* 2D/3D: hide two-button version, show single toggle */
+  .view-controls .mode-toggle-btn--desktop { display: none; }
+  .view-controls .mode-toggle-btn--mobile  { display: flex; }
+
+  /* Z adjuster: hide desktop inline, show mobile button */
+  .z-adjuster-desktop { display: none !important; }
+  .z-adjuster-mobile  { display: flex; }
+
+  /* Bottom toolbar: hide text, shrink padding */
+  .view-controls {
+    padding: 5px 7px 5px 5px;
+    gap: 1px;
+    max-width: calc(100vw - 16px);
+    overflow: hidden;
+  }
+  .view-controls .btn-label-text { display: none; }
+  .view-controls .bar-drag-handle { display: none; }
+  .view-controls .zoom-area { display: none; }
+  .view-controls .view-separator { margin: 0 1px; }
+  .view-controls .btn-label { padding: 4px 8px; }
+  .view-controls .mode-toggle-btn { padding: 3px 7px; }
+
+  /* 2D HUD chips: hidden on mobile */
+  .stats-hud-2d   { display: none !important; }
+
+  /* Hide 3D hint text on mobile */
+  .hint-3d-overlay { display: none !important; }
+
+  /* 3D Orbit cube: immediately below header */
+  .view-cube-3d {
+    position: fixed !important;
+    top: 54px !important;
+    right: 8px !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: scale(0.62) !important;
+    transform-origin: top right !important;
+    z-index: 90 !important;
+  }
+
+  /* 3D NAV overlay: just below the scaled orbit cube (54 + 104*0.62 ≈ 54+65 = 119px) */
+  .nav-overlay-3d {
+    position: fixed !important;
+    top: 120px !important;
+    right: 8px !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: scale(0.54) !important;
+    transform-origin: top right !important;
+    z-index: 89 !important;
+  }
+
+  /* Minimap: top-right corner, just below the header */
+  .minimap-container {
+    display: block;
+    position: fixed;
+    top: 62px;
+    right: 8px;
+    bottom: auto;
+    left: auto;
+    width: 72px;
+    height: 72px;
+    border-radius: 10px;
+    border: 1px solid rgba(244,129,32,0.25);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    z-index: 88;
+  }
+  .minimap-container .minimap-label {
+    font-size: 6px;
+    bottom: 3px;
+    left: 5px;
+  }
+
+  /* Header overlay: smaller padding, allow slight shrink */
+  .header-overlay {
+    padding: 5px 10px 5px 12px;
+    gap: 6px;
+  }
+  .header-overlay-left { gap: 5px; }
+  .header-overlay-left .track-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Hide Upload CSV buttons in mobile view */
+  .header-actions .btn-primary,
+  .header-overlay-right .btn-primary { display: none; }
+
+  /* Point info panel: stick to bottom as a sheet */
+  .pio-panel {
+    right: 8px;
+    left: 8px;
+    top: auto !important;
+    bottom: 90px;
+    transform: none;
+    min-width: unset;
+    max-width: unset;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  /* Logo watermark: hide on mobile to reduce clutter */
+  .v2-logo { display: none; }
+
+  /* Sidebar flyout: open to the right but not wider than viewport */
+  .sv2-flyout {
+    left: 60px;
+    max-width: calc(100vw - 72px);
+  }
+
+  /* ── Projects modal: full-width, tighter spacing ──────────────── */
+  .pm-modal {
+    width: 96vw;
+    max-height: 90vh;
+    border-radius: 14px;
+  }
+
+  .pm-header {
+    padding: 12px 14px 10px;
+  }
+  .pm-header > div:first-child > div:first-child {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 7px !important;
+  }
+  .pm-header > div:first-child > div:first-child .material-icons {
+    font-size: 15px !important;
+  }
+  .pm-header > div:first-child > div:last-child > div:first-child {
+    font-size: 13px !important;
+  }
+
+  .pm-tabs {
+    padding: 8px 14px 8px;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
+  .pm-tab {
+    padding: 5px 10px;
+    font-size: 10.5px;
+    gap: 4px;
+  }
+  .pm-tab .material-icons {
+    font-size: 12px !important;
+  }
+
+  /* Action buttons in tab bar: hide text labels, show only icons */
+  .pm-tabs > div:last-child {
+    gap: 4px !important;
+  }
+  .pm-sample-btn {
+    padding: 5px 8px;
+    font-size: 0;
+    gap: 0;
+    min-width: 0;
+  }
+  .pm-sample-btn .material-icons {
+    font-size: 15px !important;
+  }
+
+  .pm-close-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+  }
+
+  .pm-grid {
+    padding: 0 14px 14px;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .pm-card {
+    padding: 12px 12px 10px;
+    border-radius: 10px;
+  }
+
+  .pm-card-code {
+    font-size: 11px;
+  }
+
+  .pm-footer {
+    padding: 10px 14px;
+  }
+  .pm-close-text-btn {
+    padding: 5px 12px;
+    font-size: 10px;
+  }
+
+  /* ── Analytics (GraphView) toolbar: icon-only buttons ──────── */
+  .graph-controls {
+    gap: 4px;
+    padding: 4px 8px;
+    overflow-x: auto;
+  }
+  /* Title: short on mobile */
+  .graph-title-full { display: none; }
+  .graph-title-short { display: inline; }
+  .rc-title-full { display: none; }
+  .rc-title-short { display: inline; }
+
+  /* Map range: hide inline, show row-2 */
+  .gv-map-range--inline { display: none !important; }
+  .gv-map-range--row2 {
+    display: flex !important;
+    width: 100%;
+    order: 99;
+    margin-top: 2px;
+    white-space: normal;
+  }
+
+  .graph-controls .graph-title { font-size: 12px; }
+  .graph-controls > button,
+  .graph-controls > div > button {
+    font-size: 0 !important;
+    gap: 0 !important;
+    padding: 4px 6px !important;
+    min-width: 30px;
+  }
+  .graph-controls > button .material-icons,
+  .graph-controls > div > button .material-icons {
+    font-size: 16px !important;
+  }
+  /* Hide dropdown arrow icons on mobile */
+  .graph-controls > button .gv-dd-arrow,
+  .graph-controls > div > button .gv-dd-arrow { display: none !important; }
+  /* Restore text in dropdown menus */
+  .graph-controls > div > div button {
+    font-size: 9px !important;
+    gap: 3px !important;
+    padding: 5px 10px !important;
+  }
+  .graph-controls > div > div button .material-icons {
+    font-size: 12px !important;
+  }
+
+  /* ── Compare (RailCompareView) header: icon-only buttons ──── */
+  .rc-header { gap: 4px; padding: 4px 8px; overflow-x: auto; overflow-y: visible; }
+  .rc-header > span:first-child { font-size: 11px; white-space: nowrap; }
+  .rc-header > button,
+  .rc-right > div > button {
+    font-size: 0 !important;
+    gap: 0 !important;
+    padding: 4px 6px !important;
+    min-width: 30px;
+  }
+  .rc-header > button .material-icons,
+  .rc-right > div > button .material-icons {
+    font-size: 16px !important;
+  }
+  /* Hide dropdown arrow icons on mobile */
+  .rc-header > button .rc-dd-arrow,
+  .rc-right > div > button .rc-dd-arrow { display: none !important; }
+  /* Restore text in dropdown menus */
+  .rc-right > div > div button {
+    font-size: 9px !important;
+    gap: 3px !important;
+    padding: 5px 10px !important;
+  }
+  .rc-right > div > div button .material-icons {
+    font-size: 12px !important;
+  }
+
+  /* ── Point info bar in GraphView: compact row below toolbar ──── */
+  .gv-pt-info {
+    gap: 5px;
+    padding: 3px 8px;
+    font-size: 9px;
+  }
+  .gv-pt-badge { font-size: 9px; }
+  .gv-pt-stat { font-size: 8px; }
+  .gv-pt-stat b { font-size: 8px; }
+
+  /* ── Compare dropdowns: fixed overlay on mobile ── */
+  .rc-dd-menu {
+    position: fixed !important;
+    top: 42px !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: auto !important;
+    margin: 0 !important;
+    max-height: 50vh !important;
+    overflow-y: auto !important;
+    transform: none !important;
+    transform-origin: top center !important;
+    z-index: 999 !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+
+}
+
+/* ===== Mobile — tablets (521px – 768px) ===== */
+@media (min-width: 521px) and (max-width: 768px) {
+  .view-controls .mode-toggle-btn--desktop { display: none; }
+  .view-controls .mode-toggle-btn--mobile  { display: flex; }
+  .z-adjuster-desktop { display: none !important; }
+  .z-adjuster-mobile  { display: flex; }
+  .view-controls .btn-label-text { display: none; }
+  .view-controls .bar-drag-handle { display: none; }
+  .view-controls .zoom-area { display: none; }
+  .view-controls .btn-label { padding: 4px 9px; }
+  .minimap-container { display: none; }
+  .pio-panel { min-width: 200px; max-width: 240px; }
+}
+
 /* ===================================================================
    SIDEBAR V2 — Floating icon toolbar
    =================================================================== */
@@ -1664,6 +2216,8 @@ body {
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
+  cursor: grab;
+  touch-action: none;
   z-index: 90;
   display: flex;
   flex-direction: column;
@@ -1687,6 +2241,26 @@ body {
   width: 18px; height: 3px;
   background: var(--brand);
   border-radius: 0 0 4px 4px;
+}
+
+.sidebar-v2:active { cursor: grabbing; }
+.sidebar-v2 button { cursor: pointer; }
+
+.sidebar-v2--collapsed {
+  padding: 6px 5px;
+  cursor: default;
+}
+.sidebar-v2--collapsed:active { cursor: default; }
+.sidebar-v2--collapsed::before { display: none; }
+
+.sv2-collapse-btn {
+  color: rgba(148, 163, 184, 0.5) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.sv2-collapse-btn:hover {
+  color: var(--brand) !important;
+  background: rgba(244, 129, 32, 0.1) !important;
 }
 
 .sv2-btn {
@@ -1731,25 +2305,23 @@ body {
   box-shadow: 0 2px 10px rgba(239,68,68,0.3);
 }
 
-.sv2-toggle-v1 {
-  width: 30px; height: 22px;
-  border-radius: 7px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: transparent;
-  color: rgba(100,116,139,0.5);
-  cursor: pointer;
+.sv2-drag-handle {
+  width: 34px; height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
-  font-size: 11px;
+  cursor: grab;
+  color: rgba(100,116,139,0.35);
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
   margin-bottom: 1px;
+  flex-shrink: 0;
 }
-.sv2-toggle-v1:hover {
-  border-color: rgba(244,129,32,0.35);
-  color: var(--brand);
-  background: rgba(244,129,32,0.06);
+.sv2-drag-handle:hover {
+  color: rgba(148,163,184,0.7);
+  background: rgba(255,255,255,0.05);
 }
+.sv2-drag-handle:active { cursor: grabbing; }
 
 .sv2-divider {
   width: 22px;
@@ -1906,12 +2478,14 @@ body {
   align-items: center;
   gap: 6px;
   padding: 9px 12px 8px;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
+  touch-action: none;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   transition: background 0.12s;
 }
 .so-header:hover { background: rgba(255,255,255,0.03); }
+.so-header:active { cursor: grabbing; }
 
 .so-title {
   font-size: 10px;

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import Header from './components/Header';
-import LeftPanel from './components/LeftPanel';
 import SidebarV2 from './components/SidebarV2';
 import StatsOverlay from './components/StatsOverlay';
 import TrackView from './components/TrackView';
@@ -27,28 +26,17 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [activeView, setActiveView] = useState('2d'); // '2d' | '3d' | 'analytics' | 'compare'
 
-  // ── Sidebar version toggle (v1 = classic panel, v2 = floating icon bar) ──
-  const [sidebarV2, setSidebarV2] = useState(() => {
-    const saved = localStorage.getItem('railsim_sidebarV2');
-    return saved !== null ? saved === 'true' : true;
-  });
-  useEffect(() => {
-    localStorage.setItem('railsim_sidebarV2', String(sidebarV2));
-  }, [sidebarV2]);
-
-  // ── Compact (immersive) header ─────────────────────────────────────────
-  const [compactMode, setCompactMode] = useState(() => {
-    const saved = localStorage.getItem('railsim_compactMode');
-    return saved !== null ? saved === 'true' : true;
-  });
-  useEffect(() => {
-    localStorage.setItem('railsim_compactMode', String(compactMode));
-  }, [compactMode]);
-  const toggleCompactMode = useCallback(() => setCompactMode(v => !v), []);
-
   // ── Refs ───────────────────────────────────────────────────────────────
   const trackViewRef = useRef(null);
-  const headerRef    = useRef(null);
+
+  // ── Track Statistics visibility ───────────────────────────────────────
+  const [showStats, setShowStats] = useState(() => {
+    const saved = localStorage.getItem('railsim_showStats');
+    return saved !== null ? saved === 'true' : true;
+  });
+  useEffect(() => {
+    localStorage.setItem('railsim_showStats', String(showStats));
+  }, [showStats]);
 
   // ── Load project ───────────────────────────────────────────────────────
   const handleLoadProject = useCallback((proj) => {
@@ -117,6 +105,15 @@ export default function App() {
     localStorage.setItem('railsim_showElevProfile', String(showElevProfile));
   }, [showElevProfile]);
 
+  // ── 3D NAV overlay toggle ─────────────────────────────────────────────────
+  const [showNavOverlay, setShowNavOverlay] = useState(() => {
+    const saved = localStorage.getItem('railsim_showNavOverlay');
+    return saved !== null ? saved === 'true' : true;
+  });
+  useEffect(() => {
+    localStorage.setItem('railsim_showNavOverlay', String(showNavOverlay));
+  }, [showNavOverlay]);
+
   // ── Universal keyboard shortcuts ───────────────────────────────────────
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -128,8 +125,7 @@ export default function App() {
 
       if (e.ctrlKey && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
-        if (sidebarV2) setSidebarV2(false);
-        else setLeftCollapsed(v => !v);
+        setShowStats(v => !v);
         return;
       }
       if (ctrlShift && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); tv?.switchToAnalytics(); return; }
@@ -144,7 +140,7 @@ export default function App() {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarV2]);
+  }, []);
 
   // Auto-load first project on mount
   useEffect(() => {
@@ -154,8 +150,8 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* V2 floating header overlay (track name + point count) */}
       <Header
-        ref={headerRef}
         trackName={track.trackName}
         pointCount={track.trackData.length}
         onDataLoaded={(data) => { track.setTrackDataFromCSV(data); setActiveProjectId(null); }}
@@ -163,40 +159,12 @@ export default function App() {
         onSampleData={() => { track.loadSampleData(); setActiveProjectId(null); }}
         gaugeTypeId={track.gaugeTypeId}
         onGaugeTypeChange={track.setGaugeTypeId}
-        compactMode={compactMode}
-        onToggleCompactMode={toggleCompactMode}
-        hideUpload={sidebarV2}
+        compactMode={true}
+        hideUpload={false}
+        activeView={activeView}
       />
 
-      <div className="main" style={compactMode ? { height: '100vh' } : undefined}>
-
-        {/* ── V1 classic sidebar ─────────────────────────────────────── */}
-        {!sidebarV2 && (
-          <LeftPanel
-            trackData={track.trackData}
-            onOpenTrackData={handleOpenTrackData}
-            gaugeType={track.gaugeType}
-            gaugeTypeId={track.gaugeTypeId}
-            setGaugeTypeId={track.setGaugeTypeId}
-            designGauge={track.designGauge}
-            showSegDist={showSegDist}
-            showCumDist={showCumDist}
-            onShowSegDistChange={setShowSegDist}
-            onShowCumDistChange={setShowCumDist}
-            chartCount={chartCount}
-            onChartCountChange={setChartCount}
-            chartSelections={chartSelections}
-            onToggleChart={toggleChart}
-            chartDefs={CHART_DEFS}
-            activePoint={activePoint}
-            onLoadProject={handleLoadProject}
-            activeProjectId={activeProjectId}
-            compactMode={compactMode}
-            onSampleData={() => { track.loadSampleData(); setActiveProjectId(null); }}
-            collapsed={leftCollapsed}
-            onCollapseChange={setLeftCollapsed}
-          />
-        )}
+      <div className="main" style={{ height: '100vh' }}>
 
         {/* ── Main view area ─────────────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -241,11 +209,13 @@ export default function App() {
             showCumDist={showCumDist}
             showElevProfile={showElevProfile}
             onElevProfileChange={setShowElevProfile}
+            showNavOverlay={showNavOverlay}
+            onNavOverlayChange={setShowNavOverlay}
             onViewModeChange={setActiveView}
           />
 
-          {/* ── V2 floating sidebar ──────────────────────────────────── */}
-          {sidebarV2 && activeView !== 'analytics' && activeView !== 'compare' && (
+          {/* ── Floating sidebar ─────────────────────────────────────── */}
+          {activeView !== 'analytics' && activeView !== 'compare' && (
             <SidebarV2
               trackData={track.trackData}
               onOpenTrackData={handleOpenTrackData}
@@ -264,46 +234,32 @@ export default function App() {
               onToggleInput={handleToggleInput}
               onDataLoaded={(data) => { track.setTrackDataFromCSV(data); setActiveProjectId(null); }}
               onGaugeTypeChange={track.setGaugeTypeId}
-              onSwitchToV1={() => setSidebarV2(false)}
               activeView={activeView}
               showElevProfile={showElevProfile}
               onElevProfileChange={setShowElevProfile}
+              showStats={showStats}
+              onShowStatsChange={setShowStats}
             />
           )}
 
-          {/* ── Stats overlay (floating stats + point info) ────────────── */}
-          <StatsOverlay
-            trackData={track.trackData}
-            designGauge={track.designGauge}
-            gaugeType={track.gaugeType}
-            compactMode={compactMode}
-            activePoint={activePoint}
-            activeView={activeView}
-            sidebarV2={sidebarV2}
-            leftCollapsed={leftCollapsed}
-          />
-
-          {/* ── V2 logo bottom-left ─────────────────────────────────── */}
-          {sidebarV2 && (
-            <div className="v2-logo">
-              <span className="material-icons" style={{ fontSize: 14, color: 'var(--brand)' }}>tram</span>
-              <span className="v2-logo-text">
-                RAIL<span className="v2-logo-sub">SIM</span>
-              </span>
-            </div>
+          {/* ── Stats overlay ────────────────────────────────────────── */}
+          {showStats && (
+            <StatsOverlay
+              trackData={track.trackData}
+              designGauge={track.designGauge}
+              gaugeType={track.gaugeType}
+              activePoint={activePoint}
+              activeView={activeView}
+            />
           )}
 
-          {/* ── V1 "switch to V2" hint button ───────────────────────── */}
-          {!sidebarV2 && (
-            <button
-              className="v1-switch-v2-btn"
-              onClick={() => setSidebarV2(true)}
-              title="Switch to V2 sidebar"
-            >
-              <span className="material-icons" style={{ fontSize: 13 }}>auto_awesome</span>
-              V2
-            </button>
-          )}
+          {/* ── Logo watermark ───────────────────────────────────────── */}
+          <div className="v2-logo">
+            <span className="material-icons" style={{ fontSize: 14, color: 'var(--brand)' }}>tram</span>
+            <span className="v2-logo-text">
+              RAIL<span className="v2-logo-sub">SIM</span>
+            </span>
+          </div>
         </div>
 
         <RightPanel

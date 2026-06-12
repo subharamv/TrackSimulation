@@ -8,6 +8,7 @@ export default function TrackMap2D({ trackData = [], onVisibleRangeChange, activ
   const offsetYRef = useRef(0);
   const dragRef = useRef(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
+  const touchesRef = useRef(new Map()); // id → {x, y}
   const onRangeRef = useRef(onVisibleRangeChange);
   onRangeRef.current = onVisibleRangeChange;
   const activeIdxRef = useRef(activeIdx);
@@ -247,6 +248,79 @@ export default function TrackMap2D({ trackData = [], onVisibleRangeChange, activ
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
+  }, [draw]);
+
+  // ── Touch pan + pinch-to-zoom ─────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e) => {
+      e.preventDefault();
+      const map = touchesRef.current;
+      for (const t of e.changedTouches) map.set(t.identifier, { x: t.clientX, y: t.clientY });
+    };
+
+    const onTouchMove = (e) => {
+      e.preventDefault();
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const map = touchesRef.current;
+      const active = [...map.keys()];
+
+      if (e.touches.length === 1 && active.length === 1) {
+        // Single finger — pan
+        const prev = map.get(active[0]);
+        const t = e.touches[0];
+        if (prev) {
+          offsetXRef.current += (t.clientX - prev.x) * dpr;
+          offsetYRef.current += (t.clientY - prev.y) * dpr;
+        }
+        map.set(e.touches[0].identifier, { x: t.clientX, y: t.clientY });
+        draw();
+      } else if (e.touches.length >= 2) {
+        // Two fingers — pinch zoom + pan
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const prev1 = map.get(t1.identifier) || { x: t1.clientX, y: t1.clientY };
+        const prev2 = map.get(t2.identifier) || { x: t2.clientX, y: t2.clientY };
+
+        const oldDist = Math.hypot(prev1.x - prev2.x, prev1.y - prev2.y);
+        const newDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+        const oldMidX = ((prev1.x + prev2.x) / 2 - rect.left) * dpr;
+        const oldMidY = ((prev1.y + prev2.y) / 2 - rect.top) * dpr;
+        const newMidX = ((t1.clientX + t2.clientX) / 2 - rect.left) * dpr;
+        const newMidY = ((t1.clientY + t2.clientY) / 2 - rect.top) * dpr;
+
+        if (oldDist > 4) {
+          const factor = Math.max(0.5, Math.min(2, newDist / oldDist));
+          const old = scaleRef.current;
+          scaleRef.current = Math.max(0.05, Math.min(50, old * factor));
+          // Zoom around old midpoint, then pan to new midpoint
+          offsetXRef.current = newMidX - (oldMidX - offsetXRef.current) * factor;
+          offsetYRef.current = newMidY - (oldMidY - offsetYRef.current) * factor;
+          draw();
+        }
+
+        map.set(t1.identifier, { x: t1.clientX, y: t1.clientY });
+        map.set(t2.identifier, { x: t2.clientX, y: t2.clientY });
+      }
+    };
+
+    const onTouchEnd = (e) => {
+      const map = touchesRef.current;
+      for (const t of e.changedTouches) map.delete(t.identifier);
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+    };
   }, [draw]);
 
   // ── External reset trigger ────────────────────────────────────────────────

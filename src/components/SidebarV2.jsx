@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { GAUGE_TYPES } from '../utils/geometry';
 import ProjectsModal from './ProjectsModal';
 
@@ -17,19 +17,65 @@ export default function SidebarV2({
   onSampleData,
   onClearData,
   onToggleInput,
-  onSwitchToV1,
   activeView = '2d',
   showElevProfile = true,
   onElevProfileChange,
+  showStats = true,
+  onShowStatsChange,
   // Import wiring
   onDataLoaded,
   onGaugeTypeChange,
 }) {
-  const [flyout, setFlyout] = useState(null);        // 'settings' | 'clear' | null
-  const [projectsTab, setProjectsTab] = useState(null); // null | 'projects' | 'import'
+  const [flyout, setFlyout] = useState(null);
+  const [projectsTab, setProjectsTab] = useState(null);
   const [flyoutY, setFlyoutY] = useState(0);
+  const [dragPos, setDragPos] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    const saved = localStorage.getItem('railsim_sidebarCollapsed');
+    return saved === 'true';
+  });
   const sidebarRef = useRef(null);
   const btnRefs = useRef({});
+
+  useEffect(() => {
+    localStorage.setItem('railsim_sidebarCollapsed', String(collapsed));
+    if (collapsed) setFlyout(null);
+  }, [collapsed]);
+
+  const handleSidebarMouseDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, select, a')) return;
+    e.preventDefault();
+    const rect = sidebarRef.current.getBoundingClientRect();
+    const offX = e.clientX - rect.left;
+    const offY = e.clientY - rect.top;
+    const onMove = (me) => setDragPos({ x: me.clientX - offX, y: me.clientY - offY });
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, []);
+
+  const handleSidebarTouchStart = useCallback((e) => {
+    if (e.target.closest('button, input, select, a')) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const rect = sidebarRef.current.getBoundingClientRect();
+    const offX = t.clientX - rect.left;
+    const offY = t.clientY - rect.top;
+    const onMove = (me) => {
+      me.preventDefault();
+      setDragPos({ x: me.touches[0].clientX - offX, y: me.touches[0].clientY - offY });
+    };
+    const onUp = () => {
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    };
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+  }, []);
 
   const openFlyout = (name, btnId) => {
     if (flyout === name) { setFlyout(null); return; }
@@ -73,7 +119,7 @@ export default function SidebarV2({
       label: 'Track Data',
       action: () => { setFlyout(null); onOpenTrackData?.(); },
     },
-    null, // divider
+    null,
     {
       id: 'settings',
       icon: 'tune',
@@ -91,36 +137,77 @@ export default function SidebarV2({
     },
   ];
 
+  const sidebarStyle = dragPos
+    ? { top: dragPos.y, left: dragPos.x, transform: 'none' }
+    : undefined;
+
   return (
     <>
-      <div ref={sidebarRef} className="sidebar-v2">
-        {/* V1 toggle button */}
-        <button
-          className="sv2-toggle-v1"
-          onClick={onSwitchToV1}
-          title="Switch to Classic sidebar"
-        >
-          <span className="material-icons" style={{ fontSize: 13 }}>view_sidebar</span>
-        </button>
+      <div
+        ref={sidebarRef}
+        className={`sidebar-v2${collapsed ? ' sidebar-v2--collapsed' : ''}`}
+        style={sidebarStyle}
+        onMouseDown={collapsed ? undefined : handleSidebarMouseDown}
+        onTouchStart={collapsed ? undefined : handleSidebarTouchStart}
+        title={collapsed ? undefined : 'Drag to reposition'}
+      >
+        {collapsed ? (
+          /* ── Collapsed: only expand button ── */
+          <button
+            className="sv2-btn sv2-collapse-btn"
+            onClick={() => setCollapsed(false)}
+            title="Expand sidebar"
+          >
+            <span className="material-icons" style={{ fontSize: 18, pointerEvents: 'none' }}>chevron_right</span>
+          </button>
+        ) : (
+          <>
+            {/* Drag handle indicator */}
+            <div className="sv2-drag-handle">
+              <span className="material-icons" style={{ fontSize: 13, pointerEvents: 'none' }}>drag_indicator</span>
+            </div>
 
-        <div className="sv2-divider" />
+            <div className="sv2-divider" />
 
-        {BUTTONS.map((btn, i) =>
-          btn === null ? (
-            <div key={`div-${i}`} className="sv2-divider" />
-          ) : (
+            {/* Track Statistics toggle */}
             <button
-              key={btn.id}
-              ref={el => { btnRefs.current[btn.id] = el; }}
-              className={`sv2-btn${flyout === btn.id ? ' sv2-btn--active' : ''}${btn.danger ? ' sv2-btn--danger' : ''}`}
-              onClick={() => btn.action(btn.id)}
-              title={btn.label}
+              className={`sv2-btn${showStats ? ' sv2-btn--active' : ''}`}
+              onClick={() => onShowStatsChange?.(v => !v)}
+              title={showStats ? 'Hide Track Statistics' : 'Show Track Statistics'}
             >
-              <span className="material-icons" style={{ fontSize: 19 }}>{btn.icon}</span>
+              <span className="material-icons" style={{ fontSize: 19 }}>bar_chart</span>
             </button>
-          )
-        )}
 
+            <div className="sv2-divider" />
+
+            {BUTTONS.map((btn, i) =>
+              btn === null ? (
+                <div key={`div-${i}`} className="sv2-divider" />
+              ) : (
+                <button
+                  key={btn.id}
+                  ref={el => { btnRefs.current[btn.id] = el; }}
+                  className={`sv2-btn${flyout === btn.id ? ' sv2-btn--active' : ''}${btn.danger ? ' sv2-btn--danger' : ''}`}
+                  onClick={() => btn.action(btn.id)}
+                  title={btn.label}
+                >
+                  <span className="material-icons" style={{ fontSize: 19 }}>{btn.icon}</span>
+                </button>
+              )
+            )}
+
+            <div className="sv2-divider" />
+
+            {/* Collapse button at bottom */}
+            <button
+              className="sv2-btn sv2-collapse-btn"
+              onClick={() => setCollapsed(true)}
+              title="Collapse sidebar"
+            >
+              <span className="material-icons" style={{ fontSize: 18, pointerEvents: 'none' }}>chevron_left</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* Flyouts rendered OUTSIDE sidebar-v2 so position:fixed works relative to viewport */}

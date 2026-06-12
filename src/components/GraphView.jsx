@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { getBounds } from '../utils/geometry';
 import TrackMap2D from './TrackMap2D';
@@ -693,46 +693,90 @@ export default function GraphView({
     return () => document.removeEventListener('mousedown', handler);
   }, [viewModeOpen, chartSelectOpen]);
 
-  // ── Map sidebar state + drag-to-resize ──────────────────────────────────
+  // ── Map popup drag + resize ─────────────────────────────────────────────
+  const [mapPopupPos, setMapPopupPos] = useState(null); // null = default top-right position
+  const [mapPopupSize, setMapPopupSize] = useState(() => {
+    try {
+      const saved = localStorage.getItem('railsim_mapPopupSize');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  }); // null = use CSS defaults
+  const mapPopupRef = useRef(null);
+  const startMapPopupDrag = useCallback((clientX, clientY) => {
+    const el = mapPopupRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const offX = clientX - rect.left;
+    const offY = clientY - rect.top;
+    const onMove = (e) => {
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      const vpW = window.innerWidth, vpH = window.innerHeight;
+      setMapPopupPos({
+        x: Math.max(0, Math.min(cx - offX, vpW - el.offsetWidth)),
+        y: Math.max(0, Math.min(cy - offY, vpH - el.offsetHeight)),
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+  }, []);
+
+  // Corner resize handler (mouse + touch)
+  const startMapResize = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = mapPopupRef.current;
+    if (!el) return;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    const startX = cx;
+    const startY = cy;
+    const startW = el.offsetWidth;
+    const startH = el.offsetHeight;
+    const onMove = (me) => {
+      const dx = me.clientX - startX;
+      const dy = me.clientY - startY;
+      const vpW = window.innerWidth;
+      const vpH = window.innerHeight;
+      const newW = Math.max(240, Math.min(vpW - 40, startW + dx));
+      const newH = Math.max(200, Math.min(vpH - 100, startH + dy));
+      setMapPopupSize({ width: newW, height: newH });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Persist final size to localStorage
+      const el = mapPopupRef.current;
+      if (el) {
+        try {
+          localStorage.setItem('railsim_mapPopupSize', JSON.stringify({ width: el.offsetWidth, height: el.offsetHeight }));
+        } catch {}
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+    document.body.style.cursor = 'nwse-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  // ── Map sidebar state ────────────────────────────────────────────────────
   const [showMapSidebar, setShowMapSidebar] = useState(false);
-  const [mapSidebarWidth, setMapSidebarWidth] = useState(240);
-  const sidebarRef = useRef(null);
-  const dragRef = useRef(null);
-  const sidebarWidthRef = useRef(240);
-  useEffect(() => { sidebarWidthRef.current = mapSidebarWidth; }, [mapSidebarWidth]);
   // Toggle map when keyboard shortcut fires (mapToggleKey increments)
   useEffect(() => {
     if (mapToggleKey > 0) setShowMapSidebar(v => !v);
   }, [mapToggleKey]);
-  // Drag-to-resize: mousedown on handle → track mousemove/mouseup on document
-  useEffect(() => {
-    const handle = dragRef.current;
-    if (!handle) return;
-    const onMouseDown = (e) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = sidebarWidthRef.current;
-      const onMouseMove = (me) => {
-        const parent = sidebarRef.current?.parentElement;
-        const maxW = parent ? parent.clientWidth * 0.5 : 600;
-        setMapSidebarWidth(Math.max(180, Math.min(maxW, startW - (me.clientX - startX))));
-      };
-      const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        if (sidebarRef.current) sidebarRef.current.classList.remove('no-transition');
-      };
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-      if (sidebarRef.current) sidebarRef.current.classList.add('no-transition');
-    };
-    handle.addEventListener('mousedown', onMouseDown);
-    return () => handle.removeEventListener('mousedown', onMouseDown);
-  }, [showMapSidebar]);
 
   // ── Gauge vs Elevation chart (scatter or line, with status filters) ───
   const [gvseChartType, setGvseChartType] = useState('scatter');
@@ -1022,14 +1066,17 @@ export default function GraphView({
   return (
     <div id="graphViewContainer" className="active">
       <div className="graph-controls" ref={dropdownRef}>
-        <span className="graph-title">Track Profile Charts</span>
+        <span className="graph-title">
+          <span className="graph-title-full">Track Profile Charts</span>
+          <span className="graph-title-short">Analytics</span>
+        </span>
 
         {/* Layout picker: rows × cols */}
         <div style={{ position: 'relative', marginLeft: 'auto' }}>
           <button style={ddBtn(viewModeOpen)} onClick={() => { setViewModeOpen(v => !v); setChartSelectOpen(false); }}>
             <span className="material-icons" style={{ fontSize: 12 }}>grid_view</span>
-            {rowLayout}×{colLayout}
-            <span className="material-icons" style={{ fontSize: 14, opacity: 0.6 }}>arrow_drop_down</span>
+            <span className="gv-dd-arrow" style={{ fontSize: 11 }}>{rowLayout}×{colLayout}</span>
+            <span className="material-icons gv-dd-arrow" style={{ fontSize: 14, opacity: 0.6 }}>arrow_drop_down</span>
           </button>
           <div style={ddMenu(viewModeOpen, 178)}>
             {/* Rows */}
@@ -1098,8 +1145,8 @@ export default function GraphView({
         <div style={{ position: 'relative' }}>
           <button style={ddBtn(chartSelectOpen)} onClick={() => { setChartSelectOpen(v => !v); setViewModeOpen(false); }}>
             <span className="material-icons" style={{ fontSize: 12 }}>bar_chart</span>
-            Charts ({selectedCount})
-            <span className="material-icons" style={{ fontSize: 14, opacity: 0.6 }}>arrow_drop_down</span>
+            <span className="gv-dd-arrow" style={{ fontSize: 11 }}>Charts ({selectedCount})</span>
+            <span className="material-icons gv-dd-arrow" style={{ fontSize: 14, opacity: 0.6 }}>arrow_drop_down</span>
           </button>
           <div style={ddMenu(chartSelectOpen, 160)}>
             {chartDefs.map(def => {
@@ -1127,15 +1174,9 @@ export default function GraphView({
           </div>
         </div>
 
-        {/* Map viewport range indicator */}
+        {/* Map viewport range indicator — inline (desktop only) */}
         {sidebarRange && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            padding: '3px 8px', borderRadius: 4, fontSize: 10,
-            background: 'rgba(244,129,32,0.08)',
-            border: '1px solid rgba(244,129,32,0.25)',
-            color: '#111827', whiteSpace: 'nowrap',
-          }}>
+          <div className="gv-map-range gv-map-range--inline">
             <span className="material-icons" style={{ fontSize: 12, color: '#f48120' }}>filter_list</span>
             <span>
               Map view: <b style={{ color: '#111827' }}>Pt#{trackData[0]?.pointNumber}</b>
@@ -1143,15 +1184,7 @@ export default function GraphView({
               <b style={{ color: '#111827' }}>Pt#{trackData[trackData.length - 1]?.pointNumber}</b>
               <span style={{ color: '#374151' }}> ({trackData.length}/{fullTrackData?.length ?? trackData.length} pts)</span>
             </span>
-            <button
-              onClick={() => setSidebarRange(null)}
-              title="Clear map filter — show all points"
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: '#6b7280', padding: '0 1px', lineHeight: 1,
-                display: 'flex', alignItems: 'center',
-              }}
-            >
+            <button onClick={() => setSidebarRange(null)} title="Clear map filter" className="gv-map-range-close">
               <span className="material-icons" style={{ fontSize: 12 }}>close</span>
             </button>
           </div>
@@ -1160,14 +1193,56 @@ export default function GraphView({
         {/* Map sidebar toggle */}
         <button style={ddBtn(showMapSidebar)} onClick={() => { setShowMapSidebar(v => { if (v) setSidebarRange(null); return !v; }); }} title="Toggle map panel">
           <span className="material-icons" style={{ fontSize: 12 }}>map</span>
-          Map
+          <span className="gv-dd-arrow" style={{ fontSize: 11 }}>Map</span>
         </button>
 
         <button className="btn btn-sm" onClick={toggleGraphView} title="Close (Esc)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span className="material-icons" style={{ fontSize: 13 }}>close</span>
-          Close
+          <span className="gv-dd-arrow" style={{ fontSize: 11 }}>Close</span>
         </button>
+
+        {/* Map range — second row on mobile */}
+        {sidebarRange && (
+          <div className="gv-map-range gv-map-range--row2">
+            <span className="material-icons" style={{ fontSize: 12, color: '#f48120' }}>filter_list</span>
+            <span style={{ flex: 1 }}>
+              Map: <b>Pt#{trackData[0]?.pointNumber}</b>–<b>Pt#{trackData[trackData.length - 1]?.pointNumber}</b>
+              <span style={{ color: '#374151', marginLeft: 4 }}>({trackData.length} pts)</span>
+            </span>
+            <button onClick={() => setSidebarRange(null)} title="Clear map filter" className="gv-map-range-close">
+              <span className="material-icons" style={{ fontSize: 12 }}>close</span>
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Active point info bar */}
+      {activePt && (
+        <div className="gv-pt-info">
+          <span className="gv-pt-badge">
+            <span className="material-icons" style={{ fontSize: 11 }}>pin_drop</span>
+            Pt #{activePt.pointNumber}
+          </span>
+          <span className="gv-pt-stat">
+            Ch: <b>{activePt.chainage.toFixed(3)}</b> m
+          </span>
+          <span className="gv-pt-stat">
+            Gauge: <b>{activePt.gauge.toFixed(4)}</b> m
+          </span>
+          <span className="gv-pt-stat">
+            Cant: <b>{(activePt.cant * 1000).toFixed(2)}</b> mm
+          </span>
+          <span style={{
+            padding: '0 6px', borderRadius: 3, fontSize: 9, fontWeight: 700,
+            background: activePt.type === 'arc' ? 'rgba(245,158,11,0.15)' : 'rgba(16,185,129,0.12)',
+            color: activePt.type === 'arc' ? '#f59e0b' : '#10b981',
+            border: `1px solid ${activePt.type === 'arc' ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.25)'}`,
+          }}>
+            {activePt.type.toUpperCase()}
+            {activePt.radius > 0 && activePt.radius < 99999 ? ` R${activePt.radius.toFixed(0)}m` : ''}
+          </span>
+        </div>
+      )}
 
       {/* Charts + Map sidebar */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -1248,35 +1323,36 @@ export default function GraphView({
         })}
         </div>
 
-        {/* Map sidebar panel */}
-        {showMapSidebar && (
-          <div className="gv-map-sidebar" ref={sidebarRef} style={{ width: mapSidebarWidth }}>
-            <div ref={dragRef} className="gv-map-resize-handle" />
-            <div className="gv-map-sidebar-header">
-              <span className="map-sidebar-title">
-                <span className="material-icons">route</span>
-                Track Map
-              </span>
-              <span className="map-sidebar-actions">
-                <button
-                  className={`map-sidebar-btn${mapSidebarWidth > 250 ? ' active' : ''}`}
-                  onClick={() => {
-                    const w = sidebarWidthRef.current;
-                    if (w > 250) {
-                      setMapSidebarWidth(240);
-                    } else {
-                      const parent = sidebarRef.current?.parentElement;
-                      setMapSidebarWidth(parent ? Math.max(240, parent.clientWidth * 0.4) : 400);
-                    }
-                  }}
-                  title={mapSidebarWidth > 250 ? 'Collapse map' : 'Expand map'}
-                >
-                  <span className="material-icons">
-                    {mapSidebarWidth > 250 ? 'close_fullscreen' : 'open_in_full'}
-                  </span>
-                </button>
-              </span>
-            </div>
+      </div>
+
+      {/* Map — draggable popup (desktop + mobile) */}
+      {showMapSidebar && (
+        <div
+          ref={mapPopupRef}
+          className="gv-map-overlay-mobile"
+          style={{
+            ...(mapPopupSize ? { width: mapPopupSize.width, height: mapPopupSize.height } : {}),
+            ...(mapPopupPos ? { top: mapPopupPos.y, left: mapPopupPos.x, transform: 'none', bottom: 'unset', right: 'unset' } : {}),
+          }}
+        >
+          {/* Drag handle header */}
+          <div
+            className="gv-map-overlay-header"
+            onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); startMapPopupDrag(e.clientX, e.clientY); } }}
+            onTouchStart={(e) => { e.preventDefault(); startMapPopupDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+          >
+            <span className="material-icons" style={{ fontSize: 13, color: 'rgba(148,163,184,0.4)' }}>drag_indicator</span>
+            <span className="material-icons" style={{ fontSize: 14, color: 'var(--brand)' }}>route</span>
+            <span style={{ fontWeight: 600, fontSize: 12, flex: 1 }}>Track Map</span>
+            <button
+              className="gv-map-overlay-close"
+              onClick={() => { setShowMapSidebar(false); setSidebarRange(null); setMapPopupPos(null); }}
+              title="Close map"
+            >
+              <span className="material-icons" style={{ fontSize: 16 }}>close</span>
+            </button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
             <TrackMap2D
               trackData={fullTrackData}
               onVisibleRangeChange={(range) => {
@@ -1289,17 +1365,28 @@ export default function GraphView({
               showCumDist={showCumDist}
               resetKey={resetMapKey}
             />
-            <div className="gv-map-sidebar-legend">
-              {[['#3b82f6','L Rail'],['#10b981','CL'],['#ef4444','R Rail']].map(([c,l]) => (
-                <span key={l} style={{ display:'flex', alignItems:'center', gap:4 }}>
-                  <span style={{ width:8, height:8, borderRadius:'50%', background:c, display:'inline-block', flexShrink:0 }}/>
-                  {l}
-                </span>
-              ))}
+            {/* Corner resize handle */}
+            <div
+              className="gv-map-resize-corner"
+              onMouseDown={startMapResize}
+              onTouchStart={startMapResize}
+              title="Drag to resize"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M1 9L9 1M4 9L9 4M7 9L9 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
             </div>
           </div>
-        )}
-      </div>
+          <div className="gv-map-overlay-legend">
+            {[['#3b82f6','L Rail'],['#10b981','CL'],['#ef4444','R Rail']].map(([c,l]) => (
+              <span key={l}>
+                <span style={{ width:7, height:7, borderRadius:'50%', background:c, display:'inline-block', flexShrink:0 }}/>
+                {l}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

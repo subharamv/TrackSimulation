@@ -86,6 +86,7 @@ export default function ViewCube3D({ az, elev, onSnap }) {
 
   return (
     <div
+      className="view-cube-3d"
       style={{
         position: 'absolute', bottom: 12, right: 8, zIndex: 10,
         userSelect: 'none', pointerEvents: 'auto',

@@ -40,7 +40,7 @@ const C = {
   redBorder:     'rgba(220,38,38,0.3)',
 };
 
-const Header = forwardRef(function Header({ trackName, pointCount, onDataLoaded, onToggleInput, gaugeTypeId = 'tramway', onGaugeTypeChange, compactMode = false, onToggleCompactMode, hideUpload = false }, ref) {
+const Header = forwardRef(function Header({ trackName, pointCount, onDataLoaded, onToggleInput, gaugeTypeId = 'tramway', onGaugeTypeChange, compactMode = false, onToggleCompactMode, hideUpload = false, activeView }, ref) {
   const [open, setOpen]               = useState(false);
   const [step, setStep]               = useState('upload');
   const [csvRaw, setCsvRaw]           = useState(null);
@@ -132,6 +132,8 @@ const Header = forwardRef(function Header({ trackName, pointCount, onDataLoaded,
     appearance: 'auto',
   };
 
+  if (activeView === 'analytics' || activeView === 'compare') return null;
+
   return (
     <>
       {/* ── Normal header bar (v1) ── */}
@@ -197,20 +199,6 @@ const Header = forwardRef(function Header({ trackName, pointCount, onDataLoaded,
                 Upload CSV
               </button>
             )}
-            <button
-              onClick={onToggleCompactMode}
-              title="Switch to standard header"
-              className="btn btn-icon"
-              style={{
-                width: 28, height: 28,
-                background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'rgba(148,163,184,0.7)',
-                borderRadius: 6,
-              }}
-            >
-              <span className="material-icons" style={{ fontSize: 14 }}>fullscreen_exit</span>
-            </button>
           </div>
         </div>
       )}

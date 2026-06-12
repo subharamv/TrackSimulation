@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { createPortal } from 'react-dom';
 import { gsap } from 'gsap';
 import ViewCube3D from './ViewCube3D';
 
@@ -95,6 +96,7 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
   resetTrigger = 0,
   showElevProfile = true,
   onElevProfileChange,
+  showNavOverlay = true,
   onChIndexChange,
   onZoomChange,
 }, ref) {
@@ -440,20 +442,54 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
 
   // ── Touch handlers ──────────────────────────────────────────────────────
   const onTouchStart = useCallback((e) => {
+    e.preventDefault();
     stopMomentum();
     const t = e.touches[0];
     dragging.current = true;
     dragMode.current = 'orbit';
     lastPos.current = { x: t.clientX, y: t.clientY };
     lastVelocities.current = [];
+
+    // Hit-test for tap-to-select
+    hoveredPtRef.current = null;
+    setHoveredPt(null);
+    clickTargetIdx.current = -1;
+    const p = projRef.current;
+    if (p && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const mx = t.clientX - rect.left;
+      const my = t.clientY - rect.top;
+      const HIT_R2 = 22 * 22;
+      let bestD = HIT_R2, bestI = -1;
+      for (let i = 0; i < p.cl.length; i++) {
+        const ddx = p.cl[i].sx - mx;
+        const ddy = p.cl[i].sy - my;
+        const d2 = ddx * ddx + ddy * ddy;
+        if (d2 < bestD) { bestD = d2; bestI = i; }
+      }
+      if (bestI >= 0) {
+        const hov = { idx: bestI, x: t.clientX, y: t.clientY };
+        hoveredPtRef.current = hov;
+        setHoveredPt(hov);
+        clickTargetIdx.current = bestI;
+      }
+    }
+    clickStartRef3D.current = { x: t.clientX, y: t.clientY };
   }, [stopMomentum]);
 
   const onTouchMove = useCallback((e) => {
+    e.preventDefault();
     if (!dragging.current) return;
     const t = e.touches[0];
     const dx = t.clientX - lastPos.current.x;
     const dy = t.clientY - lastPos.current.y;
     lastPos.current = { x: t.clientX, y: t.clientY };
+
+    // Hide tooltip during orbit (consistent with mouse drag behavior)
+    if (hoveredPtRef.current) {
+      hoveredPtRef.current = null;
+      setHoveredPt(null);
+    }
 
     lastVelocities.current.push({ dx, dy, time: performance.now() });
     const now = performance.now();
@@ -467,6 +503,18 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
   const onTouchEnd = useCallback(() => {
     if (!dragging.current) return;
     dragging.current = false;
+
+    // Click-to-select: if barely moved and a point was targeted at touchstart
+    if (clickStartRef3D.current && clickTargetIdx.current >= 0) {
+      const dx = lastPos.current.x - clickStartRef3D.current.x;
+      const dy = lastPos.current.y - clickStartRef3D.current.y;
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) {
+        onChIndexChange?.(rangeFrom + clickTargetIdx.current);
+      }
+    }
+    clickStartRef3D.current = null;
+    clickTargetIdx.current = -1;
+
     const vel = lastVelocities.current;
     if (vel.length >= 2) {
       const newest = vel[vel.length - 1];
@@ -476,7 +524,7 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
       }
     }
     lastVelocities.current = [];
-  }, [startMomentum]);
+  }, [startMomentum, onChIndexChange, rangeFrom]);
 
   // ── Context menu: prevent on right-click ────────────────────────────────
   const onContextMenu = useCallback((e) => { e.preventDefault(); }, []);
@@ -1032,8 +1080,8 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
 
           </svg>
 
-          {/* Nav Overlay — bottom-left */}
-          <NavOverlay
+          {/* Nav Overlay — togglable */}
+          {showNavOverlay && <NavOverlay
             filteredData={filteredData}
             trackData={trackData}
             az={az} elev={elev}
@@ -1061,7 +1109,7 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
                 onUpdate() { localPanRef.current.x = panObj.px; localPanRef.current.y = panObj.py; setLocalPan({ x: panObj.px, y: panObj.py }); } });
               zoomTargetRef.current = 1.0;
             }}
-          />
+          />}
         </>
       )}
 
@@ -1092,6 +1140,7 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
 
       {/* Hint overlay — small badge at top-right */}
       <div
+        className="hint-3d-overlay"
         style={{ position: 'absolute', top: 8, right: 8, zIndex: 10 }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -1109,9 +1158,10 @@ const Rail3DView = forwardRef(function Rail3DView({ trackData, railVisibility, p
         </div>
       </div>
 
-      {/* ── Point hover tooltip ── */}
-      {hoveredPt !== null && filteredData[hoveredPt.idx] && (
-        <Pt3DTooltip pt={filteredData[hoveredPt.idx]} x={hoveredPt.x} y={hoveredPt.y} />
+      {/* ── Point hover tooltip (portal to body to escape transform ancestor) ── */}
+      {hoveredPt !== null && filteredData[hoveredPt.idx] && createPortal(
+        <Pt3DTooltip pt={filteredData[hoveredPt.idx]} x={hoveredPt.x} y={hoveredPt.y} />,
+        document.body
       )}
     </div>
   );
@@ -1218,6 +1268,7 @@ function NavOverlay({ filteredData, trackData, az, elev, chIndex, localChIndex, 
 
   return (
     <div
+      className="nav-overlay-3d"
       style={{
         position: 'absolute', bottom: 76, left: 8, zIndex: 10,
         width: PANEL_W, pointerEvents: 'auto',
@@ -1389,6 +1440,7 @@ function TelemetryHUD({ filteredData, localChIndex, zoom, az, elev, proj }) {
 
   return (
     <div
+      className="stats-hud-2d"
       style={{
         position: 'absolute', top: 8, left: 8, zIndex: 10,
         pointerEvents: 'none', userSelect: 'none',
@@ -1450,65 +1502,88 @@ const ELEV_MIN_H   = 60;
 const ELEV_HANDLE  = 8;
 
 function getElevDefault(bottom) {
-  const w = Math.min(Math.max(window.innerWidth * 0.45, ELEV_MIN_W), 820);
-  const h = 90;
+  const w = Math.min(Math.max(window.innerWidth * 0.225, ELEV_MIN_W), 410);
+  const h = ELEV_MIN_H;
   const left = Math.round((window.innerWidth - w) / 2);
   const top  = window.innerHeight - bottom - h;
   return { left, top, w, h };
 }
 
 export function ElevationProfile({ filteredData, localChIndex, size, bottom = 148, onClose }) {
-  const [rect, setRect] = useState(() => {
-    try {
-      const s = localStorage.getItem('railsim_elevProfile_rect');
-      return s ? JSON.parse(s) : null;
-    } catch { return null; }
-  });
+  const [rect, setRect] = useState(null); // never persisted; always defaults on load
 
   // Initialise default position after first paint so window dimensions are known
   useEffect(() => {
-    if (!rect) setRect(getElevDefault(bottom));
+    setRect(getElevDefault(bottom));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reset to desktop default whenever viewport crosses the mobile breakpoint
   useEffect(() => {
-    if (rect) localStorage.setItem('railsim_elevProfile_rect', JSON.stringify(rect));
-  }, [rect]);
+    const MOBILE_BP = 520;
+    let prevMobile = window.innerWidth <= MOBILE_BP;
+    const onResize = () => {
+      const nowMobile = window.innerWidth <= MOBILE_BP;
+      if (nowMobile !== prevMobile) {
+        prevMobile = nowMobile;
+        setRect(getElevDefault(bottom));
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bottom]);
 
   const r = rect ?? getElevDefault(bottom);
+
+  // ── Shared pointer-drag starter (mouse + touch) ───────────────────────────
+  const startPointerDrag = useCallback((startX, startY, onMove, cursor = 'grabbing') => {
+    document.body.style.cursor = cursor;
+    document.body.style.userSelect = 'none';
+    const onMouseMove = (e) => onMove(e.clientX, e.clientY);
+    const onTouchMove = (e) => { e.preventDefault(); if (e.touches.length === 1) onMove(e.touches[0].clientX, e.touches[0].clientY); };
+    const cleanup = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', cleanup);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', cleanup);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', cleanup);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', cleanup, { passive: true });
+  }, []);
 
   // ── Drag title bar ────────────────────────────────────────────────────────
   const onTitleMouseDown = useCallback((e) => {
     if (e.button !== 0 || e.target.dataset.resize) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX, startY = e.clientY;
+    e.preventDefault(); e.stopPropagation();
     const initL = r.left, initT = r.top;
-    const onMove = (me) => {
-      setRect(prev => ({ ...(prev ?? getElevDefault(bottom)), left: initL + me.clientX - startX, top: initT + me.clientY - startY }));
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    document.body.style.cursor = 'grabbing';
-    document.body.style.userSelect = 'none';
-  }, [r.left, r.top, bottom]);
+    startPointerDrag(e.clientX, e.clientY, (cx, cy) => {
+      setRect(prev => ({ ...(prev ?? getElevDefault(bottom)), left: initL + cx - e.clientX, top: initT + cy - e.clientY }));
+    });
+  }, [r.left, r.top, bottom, startPointerDrag]);
+
+  const onTitleTouchStart = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    const t = e.touches[0];
+    const initL = r.left, initT = r.top;
+    const sx = t.clientX, sy = t.clientY;
+    startPointerDrag(sx, sy, (cx, cy) => {
+      setRect(prev => ({ ...(prev ?? getElevDefault(bottom)), left: initL + cx - sx, top: initT + cy - sy }));
+    });
+  }, [r.left, r.top, bottom, startPointerDrag]);
 
   // ── Resize handles ────────────────────────────────────────────────────────
   const onResizeMouseDown = useCallback((e, dir) => {
     e.preventDefault(); e.stopPropagation();
-    const startX = e.clientX, startY = e.clientY;
     const { left: iL, top: iT, w: iW, h: iH } = r;
     const cursors = { n:'n-resize', s:'s-resize', e:'e-resize', w:'w-resize', ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize' };
-    document.body.style.cursor = cursors[dir] || 'nwse-resize';
-    document.body.style.userSelect = 'none';
-    const onMove = (me) => {
-      const dx = me.clientX - startX, dy = me.clientY - startY;
+    const applyResize = (cx, cy) => {
+      const dx = cx - e.clientX, dy = cy - e.clientY;
       setRect(() => {
         let left = iL, top = iT, w = iW, h = iH;
         if (dir.includes('e')) w = Math.max(ELEV_MIN_W, iW + dx);
@@ -1518,15 +1593,8 @@ export function ElevationProfile({ filteredData, localChIndex, size, bottom = 14
         return { left, top, w, h };
       });
     };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [r]);
+    startPointerDrag(e.clientX, e.clientY, applyResize, cursors[dir] || 'nwse-resize');
+  }, [r, startPointerDrag]);
 
   // ── Chart data ────────────────────────────────────────────────────────────
   const chartW = r.w;
@@ -1593,6 +1661,7 @@ export function ElevationProfile({ filteredData, localChIndex, size, bottom = 14
       {/* ── Title / drag bar ──────────────────────────────────────────── */}
       <div
         onMouseDown={onTitleMouseDown}
+        onTouchStart={onTitleTouchStart}
         style={{
           height: ELEV_TITLE_H, display: 'flex', alignItems: 'center',
           padding: '0 8px', gap: 5,
@@ -1672,21 +1741,25 @@ export function Pt3DTooltip({ pt, x, y }) {
   const cColor  = pt.cantStatus  === 'fail' ? '#ef4444' : pt.cantStatus  === 'warn' ? '#f97316' : '#10b981';
   const tColor  = pt.type === 'arc' ? '#f59e0b' : '#10b981';
   const diffMM  = pt.gaugeDiff * 1000;
+  const winW = typeof window !== 'undefined' ? window.innerWidth : 800;
+  const winH = typeof window !== 'undefined' ? window.innerHeight : 800;
 
-  // Clamp so tooltip doesn't overflow the viewport bottom
-  const top = Math.min(y - 10, (typeof window !== 'undefined' ? window.innerHeight : 800) - 260);
+  // Smart positioning: prefer right-side, flip to left if it overflows
+  const tw = 280;
+  const left = x + 16 + tw > winW - 12 ? Math.max(12, x - tw - 8) : x + 16;
+  const top = Math.min(y - 10, winH - 260);
 
   const ROW = { display: 'grid', gridTemplateColumns: '30px 1fr 1fr 1fr', gap: '1px 8px', fontSize: 9 };
   const MONO = { fontFamily: 'monospace', color: '#cbd5e1', textAlign: 'right' };
 
   return (
     <div style={{
-      position: 'fixed', left: x + 16, top,
+      position: 'fixed', left, top,
       zIndex: 9999, pointerEvents: 'none',
       background: 'rgba(45,46,47,0.97)',
       border: '1px solid rgba(244,129,32,0.38)',
-      borderRadius: 8, padding: '10px 14px',
-      minWidth: 252, maxWidth: 310,
+      borderRadius: 8, padding: '10px 12px',
+      minWidth: 180, maxWidth: `min(310px, calc(100vw - 24px))`,
       boxShadow: '0 10px 36px rgba(0,0,0,0.75), 0 0 0 1px rgba(244,129,32,0.08)',
       fontSize: 10, color: '#94a3b8', lineHeight: 1.65,
     }}>
